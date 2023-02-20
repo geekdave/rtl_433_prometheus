@@ -55,7 +55,7 @@ func TestParsingToMetrics(t *testing.T) {
 		rtl_433_temperature_celsius{channel="A",id="7997",location="",model="Acurite-Tower"} 12.6
 	`
 
-	if err := testutil.CollectAndCompare(temperature, strings.NewReader(wantTemperature), "rtl_433_temperature_celsius"); err != nil {
+	if err := testutil.CollectAndCompare(temperatureCelsius, strings.NewReader(wantTemperature), "rtl_433_temperature_celsius"); err != nil {
 		t.Errorf("unexpected collecting result:\n%s", err)
 	}
 

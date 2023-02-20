@@ -72,10 +72,17 @@ Matchers:
 		},
 		labels,
 	)
-	temperature = prometheus.NewGaugeVec(
+	temperatureCelsius = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "rtl_433_temperature_celsius",
 			Help: "Temperature in Celsius",
+		},
+		labels,
+	)
+	temperatureFahrenheit = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "rtl_433_temperature_fahrenheit",
+			Help: "Temperature in Fahrenheit",
 		},
 		labels,
 	)
@@ -83,6 +90,27 @@ Matchers:
 		prometheus.GaugeOpts{
 			Name: "rtl_433_humidity",
 			Help: "Relative Humidity (0-1.0)",
+		},
+		labels,
+	)
+	windSpeedMilesPerHour = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "rtl_433_wind_speed_miles_per_hour",
+			Help: "Wind Speed (mi/h)",
+		},
+		labels,
+	)
+	windDirectionDeg = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "rtl_433_wind_direction_deg",
+			Help: "Wind Direction (Degrees)",
+		},
+		labels,
+	)
+	rainInches = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "rtl_433_rain_in",
+			Help: "Rain (Inches)",
 		},
 		labels,
 	)
@@ -132,6 +160,12 @@ type Message struct {
 	Power1W *int32 `json:"power1_W"`
 	// Power on channel 0 (Watts)
 	Power2W *int32 `json:"power2_W"`
+	// Wind Speed in Miles Per Hour. Nil if not present in initial JSON.
+	WindSpeedMilesPerHour *float64 `json:"wind_avg_mi_h"`
+	// Wind Direction in Degrees. Nil if not present in initial JSON.
+	WindDirectionDegrees *float64 `json:"wind_dir_deg"`
+	// Rain in Inches. Nil if not present in initial JSON.
+	RainInches *float64 `json:"rain_in"`
 }
 
 type locationMatcher struct {
@@ -233,12 +267,21 @@ func run(r io.Reader) error {
 		packetsReceived.WithLabelValues(labels...).Inc()
 		timestamp.WithLabelValues(labels...).SetToCurrentTime()
 		if t := msg.TemperatureC; t != nil {
-			temperature.WithLabelValues(labels...).Set(*t)
+			temperatureCelsius.WithLabelValues(labels...).Set(*t)
 		} else if t := msg.TemperatureF; t != nil {
-			temperature.WithLabelValues(labels...).Set(fToC(*t))
+			temperatureFahrenheit.WithLabelValues(labels...).Set(*t)
 		}
 		if h := msg.Humidity; h != nil {
 			humidity.WithLabelValues(labels...).Set(float64(*h) / 100)
+		}
+		if ws := msg.WindSpeedMilesPerHour; ws != nil {
+			windSpeedMilesPerHour.WithLabelValues(labels...).Set(float64(*ws))
+		}
+		if wd := msg.WindDirectionDegrees; wd != nil {
+			windDirectionDeg.WithLabelValues(labels...).Set(float64(*wd))
+		}
+		if r := msg.RainInches; r != nil {
+			rainInches.WithLabelValues(labels...).Set(float64(*r))
 		}
 		if b, err := msg.Battery(); err == nil && b != "" {
 			switch {
@@ -273,7 +316,7 @@ func main() {
 	flag.Parse()
 	log.Print("channelMatchers: " + channelMatchers.String())
 	log.Print("idMatchers: " + idMatchers.String())
-	prometheus.MustRegister(packetsReceived, temperature, humidity, timestamp, battery, watts)
+	prometheus.MustRegister(packetsReceived, temperatureCelsius, temperatureFahrenheit, humidity, windSpeedMilesPerHour, windDirectionDeg, rainInches, timestamp, battery, watts)
 	// Add Go module build info.
 	prometheus.MustRegister(prometheus.NewBuildInfoCollector())
 
