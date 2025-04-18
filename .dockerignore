@@ -1,2 +1,7 @@
 Dockerfile
 .dockerignore
+.github/
+*.md
+*.json
+*.go
+test_input.txt

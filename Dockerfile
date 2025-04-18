@@ -1,41 +1,35 @@
-# May be built from x86_64, using cross-build-start magic.
-
 # Use the official Golang image to create a build artifact.
-# This is based on Debian and sets the GOPATH to /go.
-# https://hub.docker.com/_/golang
 FROM golang:1.24 as gobuilder
 
 # Create and change to the app directory.
 WORKDIR /app
 
 # Retrieve application dependencies.
-# This allows the container build to reuse cached dependencies.
 COPY go.* ./
 RUN go mod download
 
 # Copy local code to the container image.
 COPY . ./
 
-# Build the binary.
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=readonly -a -v rtl_433_prometheus.go
+# Build the binary for the target architecture.
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -mod=readonly -a -v -o rtl_433_prometheus rtl_433_prometheus.go
 
-FROM hertzg/rtl_433:latest as rtl_433
-FROM balenalib/raspberrypi3-64:run
+# Use a minimal base image for the final stage.
+FROM debian:bullseye-slim
 
-# https://www.balena.io/docs/reference/base-images/base-images/#building-arm-containers-on-x86-machines
-RUN [ "cross-build-start" ]
+# Install runtime dependencies.
+RUN apt-get update && apt-get install -y --no-install-recommends librtlsdr0 && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y librtlsdr0
-
+# Copy the built binary and rtl_433 tool from the builder stage.
 WORKDIR /
 COPY --from=gobuilder /app/rtl_433_prometheus /
-COPY --from=rtl_433 /usr/local/bin/rtl_433 /
-RUN chmod +x /rtl_433
+COPY --from=hertzg/rtl_433:latest /usr/local/bin/rtl_433 /
+RUN chmod +x /rtl_433 /rtl_433_prometheus
 
-# https://www.balena.io/docs/reference/base-images/base-images/#building-arm-containers-on-x86-machines
-RUN [ "cross-build-end" ]
-
+# Expose the Prometheus metrics port.
 EXPOSE 9550
+
+# Set the entrypoint and default command.
 ENTRYPOINT ["/rtl_433_prometheus"]
 CMD ["--subprocess", "/rtl_433 -F json -M newmodel"]
 
