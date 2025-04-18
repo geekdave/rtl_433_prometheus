@@ -1,6 +1,8 @@
 A Prometheus exporter for radio messages received from [rtl_433](https://github.com/merbanan/rtl_433).
 
-Hosted on Docker Hub: https://hub.docker.com/r/markhnsn/rtl_433_prometheus
+Extended from a fork of the archived project: https://github.com/mhansen/rtl_433_prometheus
+
+Hosted on Docker Hub: https://hub.docker.com/r/geekdave/rtl_433_prometheus
 
 You can configure locations using the name+channel like this:
 
