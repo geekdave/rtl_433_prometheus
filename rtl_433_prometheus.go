@@ -79,6 +79,13 @@ Matchers:
 		},
 		labels,
 	)
+	temperatureF = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "rtl_433_temperature_fahrenheit",
+			Help: "Temperature in Fahrenheit",
+		},
+		labels,
+	)	
 	humidity = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "rtl_433_humidity",
@@ -234,8 +241,9 @@ func run(r io.Reader) error {
 		timestamp.WithLabelValues(labels...).SetToCurrentTime()
 		if t := msg.TemperatureC; t != nil {
 			temperature.WithLabelValues(labels...).Set(*t)
-		} else if t := msg.TemperatureF; t != nil {
-			temperature.WithLabelValues(labels...).Set(fToC(*t))
+		}
+		if t := msg.TemperatureF; t != nil {
+			temperatureF.WithLabelValues(labels...).Set(*t)
 		}
 		if h := msg.Humidity; h != nil {
 			humidity.WithLabelValues(labels...).Set(float64(*h) / 100)
@@ -273,7 +281,7 @@ func main() {
 	flag.Parse()
 	log.Print("channelMatchers: " + channelMatchers.String())
 	log.Print("idMatchers: " + idMatchers.String())
-	prometheus.MustRegister(packetsReceived, temperature, humidity, timestamp, battery, watts)
+	prometheus.MustRegister(packetsReceived, temperature, temperatureF, humidity, timestamp, battery, watts)
 	// Add Go module build info.
 	prometheus.MustRegister(prometheus.NewBuildInfoCollector())
 
