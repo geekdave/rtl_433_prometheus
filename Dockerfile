@@ -17,10 +17,10 @@ RUN go mod download
 COPY . ./
 
 # Build the binary.
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=8 go build -mod=readonly -a -v rtl_433_prometheus.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=readonly -a -v rtl_433_prometheus.go
 
 FROM hertzg/rtl_433:latest as rtl_433
-FROM balenalib/raspberrypi3:run
+FROM balenalib/raspberrypi3-64:run
 
 # https://www.balena.io/docs/reference/base-images/base-images/#building-arm-containers-on-x86-machines
 RUN [ "cross-build-start" ]
