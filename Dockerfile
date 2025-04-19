@@ -5,7 +5,7 @@
 ################################################################
 FROM --platform=$BUILDPLATFORM golang:1.24 AS builder
 
-# These args/platforms let BuildKit cross‑compile automatically
+# Enable cross‑compile args for buildx
 ARG TARGETOS
 ARG TARGETARCH
 ENV GOOS=${TARGETOS} \
@@ -13,25 +13,26 @@ ENV GOOS=${TARGETOS} \
     CGO_ENABLED=0
 
 WORKDIR /app
-# Cache deps
+# Cache go modules
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the rest of the code and build
+# Copy source and build the exporter
 COPY . .
-RUN go build -o /usr/local/bin/rtl_433_prometheus ./cmd/rtl_433_prometheus
+# Adjust path to where your main package resides. If main.go is at root:
+RUN go build -o /usr/local/bin/rtl_433_prometheus .
 
 ################################################################
-# 2) Runtime – install only the SDR library + rtl_433 binary
+# 2) Runtime – install SDR library + rtl_433 binary
 ################################################################
 FROM --platform=$TARGETPLATFORM debian:bookworm-slim
 
-# Install RTL-SDR library and rtl_433 from the Debian repo
+# Pull in RTL-SDR library and the rtl-433 executable from Debian
 RUN apt-get update \
  && apt-get install -y librtlsdr0 rtl-433 \
  && rm -rf /var/lib/apt/lists/*
 
-# Copy our Go-based exporter
+# Copy compiled exporter
 COPY --from=builder /usr/local/bin/rtl_433_prometheus /usr/local/bin/
 
 EXPOSE 9550
