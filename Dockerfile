@@ -12,7 +12,7 @@ RUN go mod download
 COPY . ./
 
 # Build the binary for the target architecture.
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -mod=readonly -a -v -o rtl_433_prometheus ./rtl_433_prometheus.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -mod=readonly -a -v -o rtl_433_prometheus rtl_433_prometheus.go
 
 # Use a minimal base image for the final stage.
 FROM debian:bullseye-slim
