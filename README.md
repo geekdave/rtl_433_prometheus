@@ -60,17 +60,16 @@ rtl_433_timestamp_seconds{channel="C",id="7890",location="Bedroom Balcony South"
 Example `docker-compose.yml` config:
 
 ```yml
-version: '3.4'
 services:
   rtl_433_prometheus:
-    image: markhnsn/rtl_433_prometheus
+    image: geekdave/rtl_433_prometheus
     restart: always
     ports:
     - "9550:9550"
     devices:
-    - "/dev/bus/usb"
+    - "/dev/bus/usb/001/004"
     command: [
-      "--subprocess", "/rtl_433 -F json -R 19 -R 127 -R 40",
+      "--subprocess", "/usr/bin/rtl_433 -C customary -F json -R 19 -R 127 -R 40",
       "--channel_matcher", "Nexus Temperature/Humidity,1,Study",
       "--channel_matcher", "Nexus Temperature/Humidity,2,Bedroom",
       "--channel_matcher", "Nexus Temperature/Humidity,3,Balcony",
