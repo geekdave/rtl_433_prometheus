@@ -1,4 +1,4 @@
-module github.com/mhansen/rtl_433_prometheus
+module github.com/geekdave/rtl_433_prometheus
 
 go 1.22
 
