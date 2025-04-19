@@ -6,13 +6,13 @@ WORKDIR /app
 
 # Retrieve application dependencies.
 COPY go.* ./
-RUN go mod download
+# RUN go mod download
 
 # Copy local code to the container image.
 COPY . ./
 
 # Build the binary for the target architecture.
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -mod=readonly -a -v rtl_433_prometheus.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -a -v rtl_433_prometheus.go
 
 # Use a minimal base image for the final stage.
 FROM debian:bullseye-slim
