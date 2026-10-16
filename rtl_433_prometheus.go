@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -51,6 +53,7 @@ Matchers:
 </table>
 </p>`))
 
+	staleAfter      = flag.Duration("stale_after", 10*time.Minute, "Remove metrics after this long without a new reading (0 disables expiry)")
 	addr            = flag.String("listen", ":9550", "Address to listen on")
 	subprocess      = flag.String("subprocess", "rtl_433 -F json", "What command to run to get rtl_433 radio packets")
 	channelMatchers = make(locationMatchers)
@@ -85,7 +88,7 @@ Matchers:
 			Help: "Temperature in Fahrenheit",
 		},
 		labels,
-	)	
+	)
 	humidity = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "rtl_433_humidity",
@@ -108,6 +111,67 @@ Matchers:
 		labels,
 	)
 )
+
+// seriesKey identifies one metric, including derived power channels.
+type seriesKey struct {
+	vector *prometheus.MetricVec
+	labels [4]string
+}
+
+// expiringMetrics serializes updates and scrapes so a reading cannot be lost
+// between deleting an expired series and updating its value.
+type expiringMetrics struct {
+	mu       sync.Mutex
+	ttl      time.Duration
+	now      func() time.Time
+	lastSeen map[seriesKey]time.Time
+	vectors  []*prometheus.MetricVec
+}
+
+func newExpiringMetrics(ttl time.Duration) *expiringMetrics {
+	return &expiringMetrics{
+		ttl: ttl, now: time.Now, lastSeen: make(map[seriesKey]time.Time),
+		vectors: []*prometheus.MetricVec{packetsReceived.MetricVec, temperature.MetricVec,
+			temperatureF.MetricVec, humidity.MetricVec, timestamp.MetricVec, battery.MetricVec, watts.MetricVec},
+	}
+}
+
+var metrics = newExpiringMetrics(10 * time.Minute)
+
+func (e *expiringMetrics) Describe(ch chan<- *prometheus.Desc) {
+	for _, v := range e.vectors {
+		v.Describe(ch)
+	}
+}
+
+func (e *expiringMetrics) Collect(ch chan<- prometheus.Metric) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.ttl > 0 {
+		now := e.now()
+		for key, seen := range e.lastSeen {
+			if now.Sub(seen) >= e.ttl {
+				key.vector.DeleteLabelValues(key.labels[:]...)
+				delete(e.lastSeen, key)
+			}
+		}
+	}
+	for _, v := range e.vectors {
+		v.Collect(ch)
+	}
+}
+
+// Called while holding mu; receipt time avoids sensor clock skew and bad timestamps.
+func (e *expiringMetrics) touch(v *prometheus.MetricVec, labels []string, now time.Time) {
+	if e.ttl > 0 {
+		e.lastSeen[seriesKey{vector: v, labels: [4]string{labels[0], labels[1], labels[2], labels[3]}}] = now
+	}
+}
+
+func (e *expiringMetrics) set(v *prometheus.GaugeVec, labels []string, value float64, now time.Time) {
+	v.WithLabelValues(labels...).Set(value)
+	e.touch(v.MetricVec, labels, now)
+}
 
 // Message is a single sensor observation: a single line of JSON input from $ rtl_433 -F json
 type Message struct {
@@ -236,52 +300,64 @@ func run(r io.Reader) error {
 			location = channelMatchers[locationMatcher{Model: msg.Model, Matcher: channel}]
 		}
 
-		labels := []string{msg.Model, id, channel, location}
-		packetsReceived.WithLabelValues(labels...).Inc()
-		timestamp.WithLabelValues(labels...).SetToCurrentTime()
-		if t := msg.TemperatureC; t != nil {
-			temperature.WithLabelValues(labels...).Set(*t)
-		}
-		if t := msg.TemperatureF; t != nil {
-			temperatureF.WithLabelValues(labels...).Set(*t)
-		}
-		if h := msg.Humidity; h != nil {
-			humidity.WithLabelValues(labels...).Set(float64(*h) / 100)
-		}
-		if b, err := msg.Battery(); err == nil && b != "" {
-			switch {
-			case strings.EqualFold(b, "OK"):
-				battery.WithLabelValues(labels...).Set(1)
-			case strings.EqualFold(b, "LOW"):
-				battery.WithLabelValues(labels...).Set(0)
-				// TODO: handle integer values, eg.
-				// https://github.com/merbanan/rtl_433/blob/4871ca0/src/devices/ambientweather_tx8300.c#L112
-			}
-		} else if b := msg.BatteryOK; b != nil {
-			battery.WithLabelValues(labels...).Set(float64(*b))
-		} else if b := msg.BatteryLow; b != nil {
-			battery.WithLabelValues(labels...).Set(float64(1 - *b))
-		}
-		if p := msg.Power0W; p != nil {
-			watts.WithLabelValues(msg.Model, id, "0", location).Set(float64(*p))
-		}
-		if p := msg.Power1W; p != nil {
-			watts.WithLabelValues(msg.Model, id, "1", location).Set(float64(*p))
-		}
-		if p := msg.Power2W; p != nil {
-			watts.WithLabelValues(msg.Model, id, "2", location).Set(float64(*p))
-		}
+		metrics.observe(msg, id, channel, location)
 	}
 	return scanner.Err()
+}
+
+func (e *expiringMetrics) observe(msg Message, id, channel, location string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	now := e.now()
+	labels := []string{msg.Model, id, channel, location}
+	packetsReceived.WithLabelValues(labels...).Inc()
+	e.touch(packetsReceived.MetricVec, labels, now)
+	e.set(timestamp, labels, float64(now.UnixNano())/1e9, now)
+	if t := msg.TemperatureC; t != nil {
+		e.set(temperature, labels, *t, now)
+	}
+	if t := msg.TemperatureF; t != nil {
+		e.set(temperatureF, labels, *t, now)
+	}
+	if h := msg.Humidity; h != nil {
+		e.set(humidity, labels, float64(*h)/100, now)
+	}
+	if b, err := msg.Battery(); err == nil && b != "" {
+		switch {
+		case strings.EqualFold(b, "OK"):
+			e.set(battery, labels, 1, now)
+		case strings.EqualFold(b, "LOW"):
+			e.set(battery, labels, 0, now)
+			// TODO: handle integer values, eg.
+			// https://github.com/merbanan/rtl_433/blob/4871ca0/src/devices/ambientweather_tx8300.c#L112
+		}
+	} else if b := msg.BatteryOK; b != nil {
+		e.set(battery, labels, float64(*b), now)
+	} else if b := msg.BatteryLow; b != nil {
+		e.set(battery, labels, float64(1-*b), now)
+	}
+	if p := msg.Power0W; p != nil {
+		e.set(watts, []string{msg.Model, id, "0", location}, float64(*p), now)
+	}
+	if p := msg.Power1W; p != nil {
+		e.set(watts, []string{msg.Model, id, "1", location}, float64(*p), now)
+	}
+	if p := msg.Power2W; p != nil {
+		e.set(watts, []string{msg.Model, id, "2", location}, float64(*p), now)
+	}
 }
 
 func main() {
 	flag.Var(&channelMatchers, "channel_matcher", "Acurite Tower Sensor,1,Bedroom")
 	flag.Var(&idMatchers, "id_matcher", "LocationAcurite Tower Sensor,12345,Bedroom")
 	flag.Parse()
+	if *staleAfter < 0 {
+		log.Fatal("stale_after must be non-negative")
+	}
+	metrics.ttl = *staleAfter
 	log.Print("channelMatchers: " + channelMatchers.String())
 	log.Print("idMatchers: " + idMatchers.String())
-	prometheus.MustRegister(packetsReceived, temperature, temperatureF, humidity, timestamp, battery, watts)
+	prometheus.MustRegister(metrics)
 	// Add Go module build info.
 	prometheus.MustRegister(prometheus.NewBuildInfoCollector())
 

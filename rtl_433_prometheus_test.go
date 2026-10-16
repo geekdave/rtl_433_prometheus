@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -33,6 +34,9 @@ func TestChannel(t *testing.T) {
 }
 
 func TestParsingToMetrics(t *testing.T) {
+	previous := metrics
+	metrics = isolatedMetrics(t, 10*time.Minute)
+	t.Cleanup(func() { metrics = previous })
 	fn := "test_input.txt"
 	f, err := os.Open(fn)
 	if err != nil {
@@ -50,13 +54,21 @@ func TestParsingToMetrics(t *testing.T) {
  		rtl_433_temperature_celsius{channel="1",id="77",location="",model="AmbientWeather-TX8300"} 16.5
 		rtl_433_temperature_celsius{channel="1",id="94",location="",model="Nexus-TH"} 22.6
 		rtl_433_temperature_celsius{channel="2",id="184",location="",model="Nexus-TH"} 21.7
-		rtl_433_temperature_celsius{channel="2",id="59",location="",model="Ambientweather-F007TH"} 33.166666666666664
 		rtl_433_temperature_celsius{channel="3",id="55",location="",model="Ecowitt-WH53"} 18
 		rtl_433_temperature_celsius{channel="A",id="7997",location="",model="Acurite-Tower"} 12.6
 	`
 
 	if err := testutil.CollectAndCompare(temperature, strings.NewReader(wantTemperature), "rtl_433_temperature_celsius"); err != nil {
 		t.Errorf("unexpected collecting result:\n%s", err)
+	}
+
+	wantFahrenheit := `
+ # HELP rtl_433_temperature_fahrenheit Temperature in Fahrenheit
+ # TYPE rtl_433_temperature_fahrenheit gauge
+ rtl_433_temperature_fahrenheit{channel="2",id="59",location="",model="Ambientweather-F007TH"} 91.7
+ `
+	if err := testutil.CollectAndCompare(temperatureF, strings.NewReader(wantFahrenheit)); err != nil {
+		t.Errorf("unexpected Fahrenheit metrics:\n%s", err)
 	}
 
 	wantHumidity := `
