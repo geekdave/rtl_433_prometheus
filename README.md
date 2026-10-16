@@ -18,6 +18,24 @@ $ ./rtl_433_prometheus --id_matcher=Acurite-Tower,12345,Bedroom --id_matcher=Acu
 
 You can also combine `--id_matcher` with `--channel_matcher`.
 
+Metrics expire after **10 minutes without a new reading** by default. This removes
+old sensor IDs (for example, after a battery replacement) instead of exporting the
+last value forever. All sensor metrics, including packet counters and derived
+power channels, expire. Each metric's timeout is refreshed only when that field
+is received, so a sensor sending partial messages cannot keep old readings alive.
+Expiry uses the exporter's receipt time, not the sensor's clock, and runs on each
+scrape even when no radio packets arrive. Returning sensors reappear automatically;
+expired packet counters restart from zero.
+
+Use `--stale_after=30m` for sensors that report less frequently, or
+`--stale_after=0` to disable expiry. Choose a timeout longer than the expected
+reporting interval and occasional missed transmissions. Negative values are rejected.
+
+After deployment, Prometheus marks removed series stale on the next successful
+scrape. Existing history remains visible in Grafana until it leaves the selected
+time range; the old series will stop extending as a flat line. No dashboard query
+change is required.
+
 Example end-to-end usage, showing prometheus plaintext format:
 
 ```shell
